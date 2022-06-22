@@ -145,11 +145,11 @@ def timeEvolveFITS(data, t, coords, r, stars, x_length, y_length):
     returns: new star coords [x,y], image flux, times as tuple"""
 
     '''get proper frame times to apply drift'''
-    frame_time = Time(t, precision=9).unix   #current frame time from file header (unix)
+    frame_time = Time(t, precision=9, format = 'jd').unix   #current frame time from file header (unix)
     drift_time = frame_time# - coords[1,3]    #time since previous frame [s]
     '''add drift to each star's coordinates based on time since last frame'''
-    x = [coords[ind][0] for ind in range(0, stars)]
-    y = [coords[ind][1] for ind in range(0, stars)]
+    x = [coords[ind][0] for ind in range(stars)]
+    y = [coords[ind][1] for ind in range(stars)]
     
     '''get list of indices near edge of frame'''
     EdgeInds = clipCutStars(x, y, x_length, y_length)
@@ -285,7 +285,7 @@ def importFramesFITS(parentdir, filenames, start_frame, num_frames, bias, dark, 
         header = file[0].header
         
         data = (file[0].data)# - bias)#/flat
-        headerTime = header['DATE-OBS']
+        headerTime = header['JD']
         
         #change time if time is wrong (29 hours)
         # hour = str(headerTime).split('T')[1].split(':')[0]
@@ -850,7 +850,7 @@ def getLightcurves(folder, savefolder, ap_r, gain, telescope, detect_thresh, RCD
                         initial_positions[:,1], 
                         #sum_flux(first_frame[0], initial_positions[:,0], initial_positions[:,1], ap_r),
                         (sep.sum_circle(first_frame[0], initial_positions[:,0], initial_positions[:,1], ap_r, bkgann = (ap_r+2., ap_r + 4.))[0]).tolist(), 
-                        np.ones(np.shape(np.array(initial_positions))[0]) * (Time(first_frame[1], precision=9).unix)))
+                        np.ones(np.shape(np.array(initial_positions))[0]) * (Time(first_frame[1], precision=9, format = 'jd').unix)))
 
     GaussSigma = np.mean(radii * 2. / 2.35)
     first_drift = refineCentroid(*first_frame, initial_positions, GaussSigma)
@@ -873,6 +873,10 @@ def getLightcurves(folder, savefolder, ap_r, gain, telescope, detect_thresh, RCD
         current_drift = refineCentroid(*imageFile, drift_pos[-1], GaussSigma)
         drift_pos.append(current_drift[0])
 
+        x_drift , y_drift = np.mean([drift_pos[-1][i][0]-drift_pos[-2][i][0] for i in range(len(drift_pos))]),np.mean([drift_pos[-1][i][1]-drift_pos[-2][i][1] for i in range(len(drift_pos))])
+        for i in drift_pos[-1]:
+            i = (i[0]-x_drift, i[1]-y_drift)
+        
         """end drift computation"""
 
         data[t] = timeEvolveFITS(*imageFile, drift_pos[-1], ap_r, num_stars, x_length, y_length)
@@ -923,7 +927,7 @@ def getLightcurves(folder, savefolder, ap_r, gain, telescope, detect_thresh, RCD
             filehandle.write('#\n#\n#\n#\n')
             filehandle.write('#    First Image File: %s\n' %(filenames[0]))
             filehandle.write('#    Star Coords: %f %f\n' %(star_coords[0], star_coords[1]))
-            filehandle.write('#    DATE-OBS: %s\n' %(headerTimes[0][0]))
+            filehandle.write('#    DATE-OBS (JD): %s\n' %(headerTimes[0]))
             filehandle.write('#    Telescope: %s\n' %(telescope))
             filehandle.write('#    Field: %s\n' %(field_name))
             filehandle.write('#    Error: %s\n' %(error))
@@ -938,13 +942,17 @@ def getLightcurves(folder, savefolder, ap_r, gain, telescope, detect_thresh, RCD
       
             #loop through each frame to be saved
             for i in range(0, len(files_to_save)):  
-                filehandle.write('%s %f  %f\n' % (files_to_save[i], float(headerTimes[i][0].split(':')[2].split('Z')[0]), star_save_flux[i]))
+                filehandle.write('%s %f  %f\n' % (files_to_save[i], float(headerTimes[i][0]-headerTimes[0][0])*24*60, float(star_save_flux[i])))
+               # filehandle.write('%s %f  %f\n' % (files_to_save[i], float(headerTimes[i], star_save_flux[i])))
                # filehandle.write('%s %f  %f\n' % (files_to_save[i], i, star_save_flux[i]))
 
     print ("\n")
 
+
+
+
 if __name__ == '__main__':
     import pathlib
     #path = pathlib.Path(input('File path? '))
-    path = pathlib.Path('/Volumes/ICYBOX/Colibri_Obs/2022-06-12')
-    getLightcurves(path, path.parents[0], 4, 'high', 'Red', 3, False)  
+    path = pathlib.Path('/Volumes/1TB HD/Colibri_Obs/LSR J1835+3259/2022-06-12')
+    getLightcurves(path, path.parents[0], 5, 'high', 'Red', 3, False)  
