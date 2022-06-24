@@ -21,7 +21,7 @@ def get_medianLightcurve(directory, stars):
     for filename in files:
         if filename.suffix == ".txt" and filename.name.split('_')[0]!='.' and int(filename.name.split('star')[1].split('_')[0]) in stars : 
             #make dataframe containing image name, time, and star flux value for the star
-            flux = pd.read_csv(directory.joinpath(filename), delim_whitespace = True, names = ['filename', 'time', 'flux'], comment = '#')
+            flux = pd.read_csv(directory.joinpath(filename), delim_whitespace = True, names = ['filename', 'time', 'flux','x_drift', 'y_drift'], comment = '#')
 
             #star X, Y coordinates
                  #star number
@@ -42,7 +42,7 @@ def get_medianLightcurve(directory, stars):
     return medLightcurve
 
 def correctLightcurve(star, medianLightcurve):
-    flux = pd.read_csv(star, delim_whitespace = True, names = ['filename', 'time', 'flux'], comment = '#')
+    flux = pd.read_csv(star, delim_whitespace = True, names = ['filename', 'time', 'flux','x_drift', 'y_drift'], comment = '#')
     flux['flux'] = flux['flux']/medianLightcurve
     coords = linecache.getline(str(star),6).split(': ')[1].split(' ')
     starnum = star.name.split('star')[1].split('_')
@@ -82,6 +82,7 @@ def lookLightcurve(star, lightcurve):
     fig, ax1 = plt.subplots()
 
     ax1.scatter(seconds, flux['flux'])
+    plt.ylim(bottom = 180000, top = 210000)
     ax1.hlines(med, min(seconds), max(seconds), color = 'black', label = 'median: %i' % med)
     ax1.hlines(med + std, min(seconds), max(seconds), linestyle = '--', color = 'black', label = 'stddev: %.3f' % std)
     ax1.hlines(med - std, min(seconds), max(seconds), linestyle = '--', color = 'black')
@@ -96,15 +97,17 @@ def lookLightcurve(star, lightcurve):
 
 
 if __name__ == '__main__':
-    directory = pathlib.Path('/Volumes/1TB HD/Colibri_Obs/LSR J1835+3259/high_3sig_lightcurves')#_20220612')
-    stars = [2273, 2298, 2368, 2316, 2178, 2610, 2592, 2425]
+    directory = pathlib.Path('/Volumes/1TB HD/Colibri_Obs/LSR J1835+3259/lightcurves_2022-06-12')
+    stars = [2278, 2373, 2430, 2517, 2321, 2303, 2702, 2183] #20220612
+    #stars = [6688, 6952, 6769, 7123, 7990, 7213, 8039] #20220618
     medLightcurve = get_medianLightcurve(directory, stars)
-    correctedLC = correctLightcurve(directory.joinpath(pathlib.Path('star2382_2022-06-12_Red.txt')), medLightcurve)
-    lookLightcurve('2382_corrected', correctedLC)
+    correctedLC = correctLightcurve(directory.joinpath(pathlib.Path('star2373_2022-06-12_Red.txt')), medLightcurve) #20220612
+    #correctedLC = correctLightcurve(directory.joinpath(pathlib.Path('star7000_2022-06-18_Red.txt')), medLightcurve) #20220618
+    lookLightcurve('2373_corrected', correctedLC)
 
     fig, ax1 = plt.subplots()
     plt.scatter([i/650*5.7 for i in range(len(medLightcurve))], medLightcurve)
-
+    
     ax1.set_xlabel('time (hours)')
     ax1.set_ylabel('Counts/circular aperture (normalized)')
     ax1.set_title('Normalised average lightcurve (weighted with brightness)')

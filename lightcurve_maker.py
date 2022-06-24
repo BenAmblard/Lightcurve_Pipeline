@@ -163,14 +163,17 @@ def timeEvolveFITS(data, t, coords, r, stars, x_length, y_length):
     '''add up all flux within aperture'''
    #bkg = np.median(data) * np.pi * r * r
    # sepfluxes = (sep.sum_circle(data, xClip, yClip, r)[0] - bkg).tolist()
-    sepfluxes = (sep.sum_circle(data, xClip, yClip, r, bkgann = (r + 6., r + 11.))[0]).tolist()
+    photometry = sep.sum_circle(data, xClip, yClip, r, bkgann = (r + 6., r + 11.))
+    sepfluxes, sepsigma = (photometry[0]).tolist(), (photometry[1]).tolist()
+    
     
     '''set fluxes at edge to 0'''
     for i in EdgeInds:
         sepfluxes.insert(i,0)
+        sepsigma.insert(i,0)
         
     '''returns x, y star positions, fluxes at those positions, times'''
-    star_data = tuple(zip(x, y, sepfluxes, np.full(len(sepfluxes), frame_time)))
+    star_data = tuple(zip(x, y, sepfluxes, sepsigma, np.full(len(sepfluxes), frame_time)))
     return star_data
 
 
@@ -212,7 +215,7 @@ def clipCutStars(x, y, x_length, y_length):
 #     return star_fluxes
 
 
-def fluxCheck(fluxProfile, num):
+def fluxCheck(fluxProfile, num, x_drift, y_drift):
     """ Checks for problems with the star's light curve (tracking failures etc)
     input: light curve of star (array of fluxes in each image), current star number
     returns: -1 for empty profile,  -2 if too short, -3 for tracking failure, -4 for SNR too low, 0 if good
@@ -223,7 +226,7 @@ def fluxCheck(fluxProfile, num):
     light_curve = fluxProfile
     
     if len(light_curve) == 0:
-        return -1, light_curve, num
+        return -1, light_curve, num, x_drift, y_drift
       
     FramesperMin = 2400      #ideal number of frames in a directory (1 minute)
     minSNR = 5             #median/stddev limit
@@ -232,18 +235,18 @@ def fluxCheck(fluxProfile, num):
     
     #check for too short light curve
     if np.median(light_curve) == 0:
-        return -2, light_curve,  num  # reject stars that go out of frame to rapidly
+        return -2, light_curve,  num, x_drift, y_drift  # reject stars that go out of frame to rapidly
     
     #check for tracking failure
     if abs(np.mean(light_curve[:FramesperMin]) - np.mean(light_curve[-FramesperMin:])) > np.std(light_curve[:FramesperMin]):
-        return -3, light_curve, num  
+        return -3, light_curve, num, x_drift, y_drift 
     
     #check for SNR level
     if np.median(light_curve)/np.std(light_curve) < minSNR:
-        return -4, light_curve, num  # reject stars that are very dim, as SNR is too poor
+        return -4, light_curve, num, x_drift, y_drift  # reject stars that are very dim, as SNR is too poor
 
     #if all good
-    return 0, light_curve, num
+    return 0, light_curve, num, x_drift, y_drift
 
 
 def getSizeFITS(filenames):
@@ -843,13 +846,14 @@ def getLightcurves(folder, savefolder, ap_r, gain, telescope, detect_thresh, RCD
     ''' flux and time calculations with optional time evolution '''
       
     #image data (2d array with dimensions: # of images x # of stars)
-    data = np.empty([num_images, num_stars], dtype=(np.float64, 4))
+    data = np.empty([num_images, num_stars], dtype=(np.float64, 5))
     
     #get first image data from initial star positions
     data[0] = tuple(zip(initial_positions[:,0], 
                         initial_positions[:,1], 
                         #sum_flux(first_frame[0], initial_positions[:,0], initial_positions[:,1], ap_r),
                         (sep.sum_circle(first_frame[0], initial_positions[:,0], initial_positions[:,1], ap_r, bkgann = (ap_r+2., ap_r + 4.))[0]).tolist(), 
+                        (sep.sum_circle(first_frame[0], initial_positions[:,0], initial_positions[:,1], ap_r, bkgann = (ap_r+2., ap_r + 4.))[1]).tolist(),
                         np.ones(np.shape(np.array(initial_positions))[0]) * (Time(first_frame[1], precision=9, format = 'jd').unix)))
 
     GaussSigma = np.mean(radii * 2. / 2.35)
@@ -857,7 +861,7 @@ def getLightcurves(folder, savefolder, ap_r, gain, telescope, detect_thresh, RCD
     drift_pos = []  #array to hold frame positions
     drift_pos.append(first_drift[0])
 
-
+    x_drifts, y_drifts = [],[]
     for t in range(1, num_images):
         #import image
         if RCDfiles == True:
@@ -871,23 +875,24 @@ def getLightcurves(folder, savefolder, ap_r, gain, telescope, detect_thresh, RCD
         print(t)
         #y_drift , x_drift, value = corr.findOffset(prev_image[0], imageFile[0], approx_distance = 2)
         current_drift = refineCentroid(*imageFile, drift_pos[-1], GaussSigma)
-        drift_pos.append(current_drift[0])
+        
+        x_drift , y_drift = np.mean([current_drift[0][i][0]-drift_pos[-1][i][0] for i in range(len(drift_pos))]),np.mean([current_drift[0][i][1]-drift_pos[-1][i][1] for i in range(len(drift_pos))])
+        x_drifts.append(x_drift)
+        y_drifts.append(y_drift)
 
-        x_drift , y_drift = np.mean([drift_pos[-1][i][0]-drift_pos[-2][i][0] for i in range(len(drift_pos))]),np.mean([drift_pos[-1][i][1]-drift_pos[-2][i][1] for i in range(len(drift_pos))])
-        for i in drift_pos[-1]:
-            i = (i[0]-x_drift, i[1]-y_drift)
+        drift_pos.append([(i[0]+x_drift, i[1]+y_drift) for i in current_drift[0]])
         
         """end drift computation"""
 
         data[t] = timeEvolveFITS(*imageFile, drift_pos[-1], ap_r, num_stars, x_length, y_length)
                     
 
-    # data is an array of shape: [frames, star_num, {0:star x, 1:star y, 2:star flux, 3:unix_time}]  
+    # data is an array of shape: [frames, star_num, {0:star x, 1:star y, 2:star flux, 3: unix_time}]  
 
     
     results = []
     for star in range(0, num_stars):
-        results.append(fluxCheck(data[:, star, 2], star))
+        results.append(fluxCheck(data[:, star, 2], star, x_drifts, y_drifts))
         
     results = np.array(results, dtype = object)
 
@@ -932,19 +937,19 @@ def getLightcurves(folder, savefolder, ap_r, gain, telescope, detect_thresh, RCD
             filehandle.write('#    Field: %s\n' %(field_name))
             filehandle.write('#    Error: %s\n' %(error))
             filehandle.write('#\n#\n#\n')
-            filehandle.write('#filename     time      flux\n')
+            filehandle.write('#filename     time      flux      x_drift     y_drift\n')
           
             data = row[1]
-           
+            x_drifts = row[3]
+            y_drifts = row[4]
         
             files_to_save = filenames
             star_save_flux = data             #part of light curve to save
       
             #loop through each frame to be saved
             for i in range(0, len(files_to_save)):  
-                filehandle.write('%s %f  %f\n' % (files_to_save[i], float(headerTimes[i][0]-headerTimes[0][0])*24*60, float(star_save_flux[i])))
-               # filehandle.write('%s %f  %f\n' % (files_to_save[i], float(headerTimes[i], star_save_flux[i])))
-               # filehandle.write('%s %f  %f\n' % (files_to_save[i], i, star_save_flux[i]))
+                filehandle.write('%s %f  %f  %f\n' % (files_to_save[i], float(headerTimes[i][0]-headerTimes[0][0])*24*60, float(star_save_flux[i]), float(x_drifts[i]), float(x_drifts[i])))
+
 
     print ("\n")
 
@@ -955,4 +960,4 @@ if __name__ == '__main__':
     import pathlib
     #path = pathlib.Path(input('File path? '))
     path = pathlib.Path('/Volumes/1TB HD/Colibri_Obs/LSR J1835+3259/2022-06-12')
-    getLightcurves(path, path.parents[0], 5, 'high', 'Red', 3, False)  
+    getLightcurves(path, path.parents[0], 4, 'high', 'Red', 3, False)
