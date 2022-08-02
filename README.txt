@@ -19,6 +19,8 @@ relative_photometry.py is where all the lightcurve correction happens, using the
 
 
 systematics.py provides with additional function to deal with systematics that may exist after relative photometry has been performed.
+Identifies periodicity in lightcurves. 
+Was used to caracterise periodic systematics observed when plotting the lightcurves with respect to the star's pixel position on the detector.
 Not used in main.py yet
 
 --------
